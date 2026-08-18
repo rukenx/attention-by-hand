@@ -1,0 +1,231 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\softmax}{\operatorname{softmax}}
+
+\title{\textbf{Exercise 06: Multi-Query and Grouped-Query Attention}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\emph{How multiple query heads can share fewer key/value heads.}
+\end{center}
+
+\section*{1. MHA, GQA, and MQA}
+
+Let $H_q$ be the number of query heads and $H_{kv}$ the number of key/value heads.
+\[
+\boxed{\text{MHA: }H_{kv}=H_q}
+\]
+\[
+\boxed{\text{GQA: }1<H_{kv}<H_q}
+\]
+\[
+\boxed{\text{MQA: }H_{kv}=1}
+\]
+The number of query heads does not decrease when $H_{kv}$ decreases.
+
+For $H_q=4$ and GQA with $H_{kv}=2$, the group size is
+\[
+G=\frac{H_q}{H_{kv}}=2.
+\]
+Using zero-based indices,
+\[
+g(h)=\left\lfloor\frac{h}{G}\right\rfloor,
+\]
+so the mapping is
+\[
+\boxed{[0,0,1,1]}.
+\]
+For MQA, every query head maps to the single K/V head:
+\[
+\boxed{[0,0,0,0]}.
+\]
+
+\section*{2. Shared K/V attention}
+
+For query head $h$,
+\[
+\boxed{
+\mathrm{head}_h
+=\softmax\left(
+\frac{Q_hK_{g(h)}^\top}{\sqrt{d_k}}
+\right)V_{g(h)}
+}.
+\]
+$Q_h$ remains head-specific even when K/V is shared.
+
+Use
+\[
+q_1=\begin{bmatrix}1&0\end{bmatrix},
+\qquad
+q_2=\begin{bmatrix}0&1\end{bmatrix},
+\]
+\[
+K_{\mathrm{shared}}=
+\begin{bmatrix}
+1&0\\
+0&1
+\end{bmatrix},
+\qquad
+V_{\mathrm{shared}}=
+\begin{bmatrix}
+1&0\\
+1&1
+\end{bmatrix},
+\qquad d_k=2.
+\]
+The raw scores are
+\[
+q_1K_{\mathrm{shared}}^\top=\begin{bmatrix}1&0\end{bmatrix},
+\qquad
+q_2K_{\mathrm{shared}}^\top=\begin{bmatrix}0&1\end{bmatrix}.
+\]
+After scaling by $\sqrt{2}$ and applying softmax,
+\[
+A_1\approx\begin{bmatrix}0.6698&0.3302\end{bmatrix},
+\qquad
+A_2\approx\begin{bmatrix}0.3302&0.6698\end{bmatrix}.
+\]
+Therefore
+\[
+O_1=A_1V_{\mathrm{shared}}
+\approx\begin{bmatrix}1.0000&0.3302\end{bmatrix},
+\]
+\[
+O_2=A_2V_{\mathrm{shared}}
+\approx\begin{bmatrix}1.0000&0.6698\end{bmatrix}.
+\]
+The same K/V state can therefore yield different attention patterns and outputs because the queries are different.
+
+\section*{3. Projection widths}
+
+Using row-vector mathematical notation,
+\[
+W_Q\in\mathbb{R}^{d_{\mathrm{model}}\times(H_qd_k)},
+\]
+\[
+W_K\in\mathbb{R}^{d_{\mathrm{model}}\times(H_{kv}d_k)},
+\qquad
+W_V\in\mathbb{R}^{d_{\mathrm{model}}\times(H_{kv}d_v)},
+\]
+\[
+W_O\in\mathbb{R}^{(H_qd_v)\times d_{\mathrm{model}}}.
+\]
+For $d_{\mathrm{model}}=8$, $H_q=4$, and $d_k=d_v=2$:
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Architecture & Q width & K width & V width\\
+\midrule
+MHA ($H_{kv}=4$) & 8 & 8 & 8\\
+GQA ($H_{kv}=2$) & 8 & 4 & 4\\
+MQA ($H_{kv}=1$) & 8 & 2 & 2\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The combined bias-free K/V projection parameter count is
+\[
+\boxed{d_{\mathrm{model}}H_{kv}(d_k+d_v)}.
+\]
+Thus
+\[
+\text{MHA}=128,\qquad
+\text{GQA}=64,\qquad
+\text{MQA}=32.
+\]
+$W_Q$ and $W_O$ remain $8\times8$ in this toy setup.
+
+\section*{4. GQA tensor layout}
+
+A practical layout is
+\[
+Q:[B,H_q,L,D],
+\qquad
+K,V:[B,H_{kv},L,D].
+\]
+For $B=1$, $H_q=4$, $H_{kv}=2$, $L=3$, and $D=2$:
+\[
+Q:[1,4,3,2],
+\qquad
+K,V:[1,2,3,2].
+\]
+The attention score and output shapes are
+\[
+\text{scores}:[1,4,3,3],
+\qquad
+\text{output}:[1,4,3,2].
+\]
+
+A teaching implementation may materialize query-head-shaped K/V tensors such as
+\[
+K_{\mathrm{for\ q}},V_{\mathrm{for\ q}}:[B,H_q,L,D]
+\]
+by indexing each query head's assigned K/V head. This does \emph{not} imply that the physical KV cache must store $H_q$ copies. Optimized GQA implementations can map query heads to shared K/V heads without duplicating the stored cache.
+
+\section*{5. KV-cache size}
+
+For one layer,
+\[
+K_{\mathrm{cache}}\in\mathbb{R}^{B\times H_{kv}\times L\times d_k},
+\qquad
+V_{\mathrm{cache}}\in\mathbb{R}^{B\times H_{kv}\times L\times d_v}.
+\]
+The cached scalar-element count is
+\[
+\boxed{BLH_{kv}(d_k+d_v)}.
+\]
+Across $N_{\mathrm{layers}}$ layers,
+\[
+\boxed{BN_{\mathrm{layers}}LH_{kv}(d_k+d_v)}.
+\]
+For $B=1$, one layer, $L=3$, and $d_k=d_v=2$:
+\[
+\text{MHA}=48,\qquad
+\text{GQA}=24,\qquad
+\text{MQA}=12.
+\]
+The cache ratio is therefore $4:2:1$ for this setup.
+
+\section*{6. What actually gets cheaper?}
+
+Reducing $H_{kv}$ directly reduces:
+\begin{itemize}
+    \item K projection width and parameters,
+    \item V projection width and parameters,
+    \item KV-cache storage,
+    \item K/V memory traffic during decoding.
+\end{itemize}
+
+However, $H_q$ remains fixed. The model still has the same number of query heads, and each query head still forms its own attention distribution over sequence positions. Therefore
+\[
+\boxed{
+H_{kv}\downarrow
+\not\Rightarrow
+\text{all attention computation shrinks by the same factor}
+}.
+\]
+
+\section*{Final answer}
+
+MQA can use one shared K/V head while retaining multiple distinct query-head attention patterns because the query projection still produces $H_q$ distinct query heads. Those different $Q_h$ vectors interact with the same K/V state to produce different score vectors, softmax distributions, and outputs.
+
+\section*{Bonus}
+
+KV-cache storage is linear in $L$, so doubling sequence length doubles cache size for MHA, GQA, and MQA. Their relative ratios do not change; those ratios are determined by $H_{kv}$.
+
+\section*{Numerical verification}
+
+The companion \texttt{answer\_key.py} verifies the head mappings, shared-K/V numerical example, projection widths, cache ratios, and a GQA tensor attention calculation. It also compares a materialized vectorized teaching implementation with the canonical per-query-head formula.
+
+\end{document}

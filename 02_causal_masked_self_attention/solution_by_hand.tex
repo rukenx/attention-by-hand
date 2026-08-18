@@ -1,0 +1,149 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\softmax}{\operatorname{softmax}}
+
+\title{\textbf{Exercise 02: Causal Masked Self-Attention}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\emph{Scaled dot-product self-attention with future-token visibility removed before softmax.}
+\end{center}
+
+\section*{Setup}
+
+Use the same tensors as Exercise 01:
+\[
+Q=
+\begin{bmatrix}
+1&0\\
+0&1\\
+1&1
+\end{bmatrix},
+\qquad
+K=
+\begin{bmatrix}
+1&1\\
+0&1\\
+1&2
+\end{bmatrix},
+\qquad
+V=
+\begin{bmatrix}
+1&0\\
+1&1\\
+2&1
+\end{bmatrix}.
+\]
+The unmasked scaled scores are
+\[
+S_{\mathrm{scaled}}
+=\frac{QK^\top}{\sqrt{2}}
+\approx
+\begin{bmatrix}
+0.7071&0&0.7071\\
+0.7071&0.7071&1.4142\\
+1.4142&0.7071&2.1213
+\end{bmatrix}.
+\]
+
+\section*{1. Apply the causal mask}
+
+For three tokens,
+\[
+M=
+\begin{bmatrix}
+0&-\infty&-\infty\\
+0&0&-\infty\\
+0&0&0
+\end{bmatrix}.
+\]
+Therefore
+\[
+S_{\mathrm{masked}}
+=S_{\mathrm{scaled}}+M
+\approx
+\begin{bmatrix}
+0.7071&-\infty&-\infty\\
+0.7071&0.7071&-\infty\\
+1.4142&0.7071&2.1213
+\end{bmatrix}.
+\]
+The forbidden connections are `I' to `like', `I' to `cats', and `like' to `cats'.
+
+\section*{2. Apply row-wise softmax}
+
+Because $e^{-\infty}=0$, every masked future position receives zero probability:
+\[
+A_{\mathrm{causal}}
+=\softmax(S_{\mathrm{masked}})
+\approx
+\begin{bmatrix}
+1.0000&0&0\\
+0.5000&0.5000&0\\
+0.2840&0.1400&0.5760
+\end{bmatrix}.
+\]
+Each row sums to approximately $1$.
+
+The first row has only one visible key, so its entire probability mass is on `I'. The second row distributes mass across `I' and `like'. The final row sees all three positions.
+
+\section*{3. Compute the causal output}
+
+\[
+O_{\mathrm{causal}}
+=A_{\mathrm{causal}}V
+\approx
+\begin{bmatrix}
+1.0000&0.0000\\
+1.0000&0.5000\\
+1.5760&0.7160
+\end{bmatrix}.
+\]
+
+Compare this with the unmasked Exercise 01 output:
+\[
+O_{\mathrm{unmasked}}
+\approx
+\begin{bmatrix}
+1.4011&0.5989\\
+1.5035&0.7517\\
+1.5760&0.7160
+\end{bmatrix}.
+\]
+Only the final row is unchanged.
+
+\section*{Final answer}
+
+The `cats' row is unchanged because `cats' is the final token: there are no future positions to remove from its visibility set. The `I' and `like' rows both lose at least one future key before softmax, so their normalized attention distributions change.
+
+\section*{Bonus}
+
+The mask must be applied before softmax because softmax normalizes over all logits in the row. If forbidden probabilities were simply zeroed after softmax, the normalization denominator would already have included the future-token logits and the remaining allowed probabilities would no longer sum to $1$.
+
+For example, the unmasked first row is approximately
+\[
+\begin{bmatrix}0.4011&0.1978&0.4011\end{bmatrix}.
+\]
+Zeroing future entries afterward would give
+\[
+\begin{bmatrix}0.4011&0&0\end{bmatrix},
+\]
+whose row sum is $0.4011$, not $1$. Masking the logits first instead yields
+\[
+\begin{bmatrix}1&0&0\end{bmatrix}.
+\]
+
+\section*{Numerical verification}
+
+The companion \texttt{answer\_key.py} verifies the causal mask, exact future-position zeros, row sums, and expected output values.
+
+\end{document}

@@ -1,0 +1,244 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\softmax}{\operatorname{softmax}}
+\newcommand{\Concat}{\operatorname{Concat}}
+
+\title{\textbf{Exercise 03: Multi-Head Self-Attention}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\emph{A numerical two-head self-attention example with independent projections.}
+\end{center}
+
+\section*{Setup}
+
+Use the row-token input
+\[
+X=
+\begin{bmatrix}
+1&0&1&0\\
+0&1&1&1\\
+1&1&0&1
+\end{bmatrix}
+\in\mathbb{R}^{3\times4}.
+\]
+There are $H=2$ heads with $d_k=d_v=2$ per head. The projection matrices are fixed toy values; nothing is trained in this exercise.
+
+\section*{Head 1}
+
+Head 1 uses
+\[
+W_Q^{(1)}=W_K^{(1)}=W_V^{(1)}=
+\begin{bmatrix}
+1&0\\
+0&1\\
+0&0\\
+0&0
+\end{bmatrix}.
+\]
+Therefore
+\[
+Q_1=K_1=V_1=
+\begin{bmatrix}
+1&0\\
+0&1\\
+1&1
+\end{bmatrix}.
+\]
+
+The scaled score matrix is
+\[
+\frac{Q_1K_1^\top}{\sqrt{2}}
+\approx
+\begin{bmatrix}
+0.7071&0&0.7071\\
+0&0.7071&0.7071\\
+0.7071&0.7071&1.4142
+\end{bmatrix}.
+\]
+Applying row-wise softmax gives
+\[
+A_1\approx
+\begin{bmatrix}
+0.4011&0.1978&0.4011\\
+0.1978&0.4011&0.4011\\
+0.2483&0.2483&0.5035
+\end{bmatrix}.
+\]
+The first head output is
+\[
+O_1=A_1V_1
+\approx
+\begin{bmatrix}
+0.8022&0.5989\\
+0.5989&0.8022\\
+0.7517&0.7517
+\end{bmatrix}.
+\]
+
+\section*{Head 2}
+
+Head 2 receives the same $X$ but uses different projections:
+\[
+W_Q^{(2)}=
+\begin{bmatrix}
+0&0\\
+0&0\\
+1&0\\
+0&1
+\end{bmatrix},\quad
+W_K^{(2)}=
+\begin{bmatrix}
+0&0\\
+0&0\\
+0&1\\
+1&0
+\end{bmatrix},\quad
+W_V^{(2)}=
+\begin{bmatrix}
+0&0\\
+0&0\\
+1&0\\
+0&1
+\end{bmatrix}.
+\]
+This gives
+\[
+Q_2=
+\begin{bmatrix}
+1&0\\
+1&1\\
+0&1
+\end{bmatrix},\qquad
+K_2=
+\begin{bmatrix}
+0&1\\
+1&1\\
+1&0
+\end{bmatrix},\qquad
+V_2=
+\begin{bmatrix}
+1&0\\
+1&1\\
+0&1
+\end{bmatrix}.
+\]
+
+The scaled score matrix is
+\[
+\frac{Q_2K_2^\top}{\sqrt{2}}
+\approx
+\begin{bmatrix}
+0&0.7071&0.7071\\
+0.7071&1.4142&0.7071\\
+0.7071&0.7071&0
+\end{bmatrix}.
+\]
+Hence
+\[
+A_2\approx
+\begin{bmatrix}
+0.1978&0.4011&0.4011\\
+0.2483&0.5035&0.2483\\
+0.4011&0.4011&0.1978
+\end{bmatrix},
+\]
+and
+\[
+O_2=A_2V_2
+\approx
+\begin{bmatrix}
+0.5989&0.8022\\
+0.7517&0.7517\\
+0.8022&0.5989
+\end{bmatrix}.
+\]
+
+\section*{Why the heads differ}
+
+The two heads receive the same input matrix $X$, but they do not see the same projected geometry. Their independent $W_Q$, $W_K$, and $W_V$ matrices produce different query-key dot products and therefore different attention distributions:
+\[
+A_1\neq A_2.
+\]
+
+This controlled example demonstrates only that independent projections can produce distinct attention patterns. The projection matrices are hand-designed rather than learned, so the exercise does \emph{not} assign semantic roles such as ``relational'' or ``anchoring'' to either head.
+
+\section*{Concatenation}
+
+Concatenate the head outputs along the feature dimension:
+\[
+O_{\mathrm{concat}}=\Concat(O_1,O_2)
+\approx
+\begin{bmatrix}
+0.8022&0.5989&0.5989&0.8022\\
+0.5989&0.8022&0.7517&0.7517\\
+0.7517&0.7517&0.8022&0.5989
+\end{bmatrix}.
+\]
+Thus
+\[
+O_{\mathrm{concat}}\in\mathbb{R}^{3\times4}.
+\]
+
+\section*{Output projection}
+
+For this toy exercise,
+\[
+W_O=I_4.
+\]
+Therefore
+\[
+O_{\mathrm{MHA}}=O_{\mathrm{concat}}W_O=O_{\mathrm{concat}}.
+\]
+The identity choice is only a simplification that keeps the concatenated features visible. In a trained Transformer, $W_O$ is learned and mixes information across head features.
+
+\section*{Causal extension}
+
+If the same two-head layer were causal, the same causal mask $M$ would be added inside each head before softmax:
+\[
+A_{h,\mathrm{causal}}
+=
+\softmax\left(
+\frac{Q_hK_h^\top}{\sqrt{d_k}}+M
+\right).
+\]
+The visibility constraint is shared, while each head still has its own projected logits.
+
+\section*{Pipeline summary}
+
+For each head $h$,
+\[
+Q_h=XW_Q^{(h)},\qquad
+K_h=XW_K^{(h)},\qquad
+V_h=XW_V^{(h)},
+\]
+\[
+\mathrm{head}_h
+=
+\softmax\left(\frac{Q_hK_h^\top}{\sqrt{d_k}}\right)V_h.
+\]
+Then
+\[
+\boxed{
+O_{\mathrm{MHA}}
+=
+\Concat(\mathrm{head}_1,\ldots,\mathrm{head}_H)W_O
+}.
+\]
+
+\section*{Numerical verification}
+
+The companion \texttt{answer\_key.py} reproduces the two attention matrices, both head outputs, the concatenation, and the final identity output projection with deterministic assertions.
+
+\end{document}
